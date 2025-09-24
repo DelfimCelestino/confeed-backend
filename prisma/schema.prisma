@@ -1,0 +1,157 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Ou "mysql" ou "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String          @id @default(uuid())
+  nickname              String          @unique
+  avatarUrl             String?         @db.Text
+  ip                    String?
+  platform              String?
+  country               String?
+  language              String?
+  timezone              String?
+  userAgent             String?
+  screen                String?
+  state                 String?
+  city                  String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  confessions           Confession[]
+  Upvotes               Upvote[]
+  Comments              Comment[]
+  CommentUpvotes        CommentUpvote[]
+  Communities           Communities[]
+  notificationsReceived Notification[]  @relation("NotificationsReceived")
+  notificationsActed    Notification[]  @relation("NotificationsActed")
+}
+
+model Confession {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  title       String   @db.Text
+  images      String[]
+  description String   @db.Text
+  videoUrl    String?
+  isAdult     Boolean  @default(false)
+  isSensitive Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  communityId String?
+  community   Communities? @relation(fields: [communityId], references: [id], onDelete: SetNull)
+
+  Upvotes      Upvote[]
+  Comments     Comment[]
+  Notification Notification[]
+
+  @@index([userId])
+}
+
+model Upvote {
+  id           String     @id @default(uuid())
+  confessionId String
+  confession   Confession @relation(fields: [confessionId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([confessionId, userId])
+  @@index([userId])
+  @@index([confessionId])
+}
+
+model Comment {
+  id             String          @id @default(uuid())
+  confessionId   String
+  confession     Confession      @relation(fields: [confessionId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentId       String?
+  parent         Comment?        @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies        Comment[]       @relation("CommentReplies")
+  comment        String          @db.Text
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  CommentUpvotes CommentUpvote[]
+  Notification   Notification[]
+
+  @@index([confessionId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model CommentUpvote {
+  id        String   @id @default(uuid())
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId])
+  @@index([userId])
+  @@index([commentId])
+}
+
+model Communities {
+  id          String   @id @default(uuid())
+  name        String   @db.Text
+  description String   @db.Text
+  coverImage  String?
+  slug        String   @unique
+  isAdult     Boolean  @default(false)
+  isSensitive Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  Confessions  Confession[]
+  Notification Notification[]
+
+  @@index([userId])
+}
+
+enum NotificationType {
+  upvote_confession
+  upvote_comment
+  comment
+  reply
+}
+
+model Notification {
+  id          String           @id @default(uuid())
+  type        NotificationType
+  recipientId String
+  recipient   User             @relation("NotificationsReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+  actorId     String
+  actor       User             @relation("NotificationsActed", fields: [actorId], references: [id], onDelete: Cascade)
+  title       String           @db.Text
+  description String?          @db.Text
+  url         String           @db.Text
+  isRead      Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  confessionId String?
+  confession   Confession?  @relation(fields: [confessionId], references: [id], onDelete: SetNull)
+  commentId    String?
+  comment      Comment?     @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  communityId  String?
+  community    Communities? @relation(fields: [communityId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, isRead])
+}
