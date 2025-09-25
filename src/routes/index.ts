@@ -49,6 +49,7 @@ const routes = {
     fastify.post("/:id/mark", { preHandler: authenticate }, NotificationsController.markRead);
   },
 
+  // Registra health check
   health: async (fastify: FastifyInstance) => {
     fastify.get("/", async (req, res) => {
    
@@ -89,6 +90,8 @@ export const registerRoutes = async (fastify: FastifyInstance) => {
 
       // Registra notificações
       fastify.register(routes.notifications, { prefix: "/notifications" });
+      // Registra health check
+      fastify.register(routes.health, { prefix: "/health" });
 
       // ... registro de outras rotas
     },
