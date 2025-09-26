@@ -124,15 +124,45 @@ export const getConfessions = async (req: FastifyRequest, reply: FastifyReply) =
     const skip = (pageNum - 1) * limitNum;
     const userId = (req as any).user?.id;
 
-    const where = communitySlug
-      ? { community: { is: { slug: communitySlug } } }
-      : {};
+    // Total count (respecting optional community filter)
+    const total = await (prisma as any).confession.count({
+      where: communitySlug ? { community: { is: { slug: communitySlug } } } : {},
+    });
 
+    // Fetch randomized ids using PostgreSQL ORDER BY random(), with optional community filter
+    const idsRows = communitySlug
+      ? await (prisma as any).$queryRaw<Array<{ id: string }>>`
+          SELECT c.id
+          FROM "Confession" c
+          LEFT JOIN "Communities" cm ON cm.id = c."communityId"
+          WHERE cm.slug = ${communitySlug}
+          ORDER BY random()
+          LIMIT ${limitNum} OFFSET ${skip}
+        `
+      : await (prisma as any).$queryRaw<Array<{ id: string }>>`
+          SELECT c.id
+          FROM "Confession" c
+          ORDER BY random()
+          LIMIT ${limitNum} OFFSET ${skip}
+        `;
+
+    const ids = idsRows.map((r: { id: string }) => r.id);
+
+    if (ids.length === 0) {
+      return reply.status(200).send({
+        confessions: [],
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum),
+        }
+      });
+    }
+
+    // Fetch full records for the randomized ids
     const confessions = await (prisma as any).confession.findMany({
-      where,
-      skip,
-      take: limitNum,
-      orderBy: { createdAt: "desc" },
+      where: { id: { in: ids } },
       include: {
         user: {
           select: {
@@ -156,15 +186,15 @@ export const getConfessions = async (req: FastifyRequest, reply: FastifyReply) =
       }
     });
 
-    const total = await (prisma as any).confession.count({ where });
+    // Preserve random order
+    const confessionById: Record<string, any> = {};
+    for (const c of confessions) confessionById[c.id] = c;
+    const ordered = ids.map((id: string) => confessionById[id]).filter(Boolean);
 
     return reply.status(200).send({
-      confessions: await Promise.all(confessions.map(async (confession: any) => {
-        // Check if user has upvoted this confession
+      confessions: await Promise.all(ordered.map(async (confession: any) => {
         const hasUserUpvoted = userId ? confession.Upvotes.some((upvote: any) => upvote.userId === userId) : false;
-        // Count only top-level comments
         const topLevelComments = await (prisma as any).comment.count({ where: { confessionId: confession.id, parentId: null } });
-        
         return {
           id: confession.id,
           title: confession.title,
