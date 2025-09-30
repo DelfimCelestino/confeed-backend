@@ -26,12 +26,12 @@ export const createConfession = async (req: FastifyRequest, reply: FastifyReply)
       return reply.status(400).send({ message: "title and description are required" });
     }
 
-    if (body.title.length < 3 || body.title.length > 100) {
-      return reply.status(400).send({ message: "title must be between 3 and 100 characters" });
+    if (body.title.length < 3 || body.title.length > 1000) {
+      return reply.status(400).send({ message: "title must be between 3 and 1000 characters" });
     }
 
-    if (body.description.length < 10) {
-      return reply.status(400).send({ message: "description must be at least 10 characters" });
+    if (body.description.length < 100) {
+      return reply.status(400).send({ message: "description must be at least 100 characters" });
     }
 
     // Generate unique slug
@@ -118,7 +118,7 @@ export const createConfession = async (req: FastifyRequest, reply: FastifyReply)
 
 export const getConfessions = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { page = "1", limit = "10", communitySlug } = req.query as { page?: string; limit?: string; communitySlug?: string };
+    const { page = "1", limit = "100", communitySlug } = req.query as { page?: string; limit?: string; communitySlug?: string };
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
@@ -538,7 +538,7 @@ export const createComment = async (req: FastifyRequest, reply: FastifyReply) =>
 
 export const getComments = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { confessionId, page = "1", limit = "10", order = "desc" } = req.query as { confessionId?: string; page?: string; limit?: string; order?: "asc" | "desc" };
+    const { confessionId, page = "1", limit = "100", order = "desc" } = req.query as { confessionId?: string; page?: string; limit?: string; order?: "asc" | "desc" };
     
     if (!confessionId) {
       return reply.status(400).send({ message: "confessionId is required" });
