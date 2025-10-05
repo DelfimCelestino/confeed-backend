@@ -47,6 +47,7 @@ export const getChatHistory = async (request: FastifyRequest, reply: FastifyRepl
       avatarUrl: msg.user?.avatarUrl,
       text: msg.text,
       createdAt: msg.createdAt.toISOString(),
+      editedAt: msg.editedAt ? msg.editedAt.toISOString() : undefined,
       replyTo: msg.replyTo
         ? {
             id: msg.replyTo.id,

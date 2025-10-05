@@ -248,6 +248,46 @@ export const initialize = (fastify: FastifyInstance) => {
       }
     });
 
+    // Edição de mensagem
+    socket.on("chat:edit", async (payload: { id: string; text: string }) => {
+      try {
+        if (!payload?.id || typeof payload.text !== "string") return;
+        // Apenas o autor pode editar
+        const existing = await (prisma as any).chatMessage.findUnique({ where: { id: payload.id } });
+        if (!existing || existing.userId !== userId) return;
+
+        const updated = await (prisma as any).chatMessage.update({
+          where: { id: payload.id },
+          data: { text: payload.text, editedAt: new Date() },
+          include: {
+            user: { select: { id: true, nickname: true, avatarUrl: true } },
+            replyTo: { include: { user: { select: { id: true, nickname: true } } } },
+          },
+        });
+
+        const message: GlobalChatMessage = {
+          id: updated.id,
+          userId: updated.userId,
+          nickname: updated.user?.nickname,
+          avatarUrl: updated.user?.avatarUrl ?? undefined,
+          text: updated.text,
+          createdAt: updated.createdAt.toISOString(),
+          replyTo: updated.replyTo
+            ? {
+                id: updated.replyTo.id,
+                userId: updated.replyTo.userId,
+                nickname: updated.replyTo.user?.nickname,
+                text: updated.replyTo.text,
+              }
+            : undefined,
+        };
+
+        io.to("global").emit("chat:message_edit", { ...message, editedAt: updated.editedAt?.toISOString() });
+      } catch (e) {
+        console.error("Erro ao editar mensagem:", e);
+      }
+    });
+
     // Evento de desconexão
     socket.on("disconnect", () => {
       console.log(`🚪 Usuário ${socket.id} desconectado`);
