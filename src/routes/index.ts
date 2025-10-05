@@ -5,6 +5,7 @@ import * as ConfessionController from "../controllers/confessionController";
 import * as CommunityController from "../controllers/communityController";
 import * as SearchController from "../controllers/searchController";
 import * as NotificationsController from "../controllers/notificationsController";
+import * as ChatController from "../controllers/chatController";
 
 
 // Agrupa todas as rotas em um objeto
@@ -49,6 +50,10 @@ const routes = {
     fastify.post("/:id/mark", { preHandler: authenticate }, NotificationsController.markRead);
   },
 
+  chat: async (fastify: FastifyInstance) => {
+    fastify.get("/history", { preHandler: authenticate }, ChatController.getChatHistory);
+  },
+
   // Registra health check
   health: async (fastify: FastifyInstance) => {
     fastify.get("/", async (req, res) => {
@@ -90,6 +95,10 @@ export const registerRoutes = async (fastify: FastifyInstance) => {
 
       // Registra notificações
       fastify.register(routes.notifications, { prefix: "/notifications" });
+
+      // Registra chat
+      fastify.register(routes.chat, { prefix: "/chat" });
+
       // Registra health check
       fastify.register(routes.health, { prefix: "/health" });
 

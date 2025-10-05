@@ -35,6 +35,7 @@ model User {
   Communities           Communities[]
   notificationsReceived Notification[]  @relation("NotificationsReceived")
   notificationsActed    Notification[]  @relation("NotificationsActed")
+  chatMessages          ChatMessage[]
 }
 
 model Confession {
@@ -154,4 +155,18 @@ model Notification {
   community    Communities? @relation(fields: [communityId], references: [id], onDelete: SetNull)
 
   @@index([recipientId, isRead])
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+  replyToId String?
+  replyTo   ChatMessage? @relation("ChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   ChatMessage[] @relation("ChatReplies")
+
+  @@index([userId])
+  @@index([createdAt])
 }
