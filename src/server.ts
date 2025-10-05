@@ -11,6 +11,7 @@ import fastifyStatic from "@fastify/static";
 import cors from "@fastify/cors";
 import { registerRoutes } from "./routes";
 import { initialize as initializeSocket } from "./config/socket";
+import { clearAllChatMessages } from "./utils/functions";
 
 import cron from "node-cron";
 
@@ -139,6 +140,20 @@ const startServer = async (): Promise<void> => {
 
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`🌐 Ambiente: ${NODE_ENV}`);
+
+    // Cron diário para limpar mensagens às 00:59
+    try {
+      cron.schedule("59 0 * * *", async () => {
+        console.log("🧹 Limpando mensagens do chat (cron 00:59)...");
+        try {
+          await clearAllChatMessages();
+          console.log("✅ Mensagens do chat limpas");
+        } catch (e) {
+          console.error("❌ Falha ao limpar mensagens do chat:", e);
+        }
+      });
+      console.log("⏰ Cron de limpeza de mensagens diário registrado (00:59)");
+    } catch {}
   } catch (err: any) {
     console.error("💥 Falha crítica ao iniciar o servidor:", err);
     process.exit(1);

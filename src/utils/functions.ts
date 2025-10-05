@@ -61,3 +61,8 @@ export const generateUniqueCommunitySlug = async (name: string): Promise<string>
   return slug;
 };
 
+// Remove all chat messages (used by daily cron)
+export const clearAllChatMessages = async (): Promise<void> => {
+  await (prisma as any).chatMessage.deleteMany({});
+};
+
