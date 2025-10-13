@@ -90,7 +90,17 @@ class AIProfileManager {
 
       if (availableProfiles.length > 0) {
         const selected = availableProfiles[Math.floor(Math.random() * availableProfiles.length)];
-        const user = await (prisma as any).user.findUnique({ where: { id: selected.userId } });
+        let user = await (prisma as any).user.findUnique({ where: { id: selected.userId } });
+
+        // Se o usuário não tem avatar, atribuir um
+        if (!user.avatarUrl) {
+          const avatarUrl = AI_AVATARS[Math.floor(Math.random() * AI_AVATARS.length)];
+          user = await (prisma as any).user.update({
+            where: { id: user.id },
+            data: { avatarUrl }
+          });
+          console.log(`🎨 Avatar atribuído ao perfil AI: ${user.nickname}`);
+        }
 
         // Atualizar último uso
         this.activeProfiles.set(selected.userId, {
