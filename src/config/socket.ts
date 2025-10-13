@@ -18,6 +18,10 @@ const connectedUsers: Map<string, SocketUser> = new Map();
 const usersInGlobalChat: Set<string> = new Set();
 const unreadByUserId: Map<string, number> = new Map();
 
+// Controle de quem está digitando
+const typingUsers: Map<string, { nickname: string; timestamp: number }> = new Map();
+const TYPING_TIMEOUT = 3000; // 3 segundos
+
 interface GlobalChatMessage {
   id: string;
   userId: string;
@@ -288,13 +292,57 @@ export const initialize = (fastify: FastifyInstance) => {
       }
     });
 
+    // Indicador de digitação
+    socket.on("chat:typing", () => {
+      if (!userId || !nickname) return;
+      
+      // Adiciona o usuário à lista de digitando
+      typingUsers.set(userId, { nickname, timestamp: Date.now() });
+      
+      // Emite a lista atualizada de quem está digitando
+      emitTypingStatus();
+    });
+
+    socket.on("chat:stop_typing", () => {
+      if (!userId) return;
+      
+      // Remove o usuário da lista de digitando
+      typingUsers.delete(userId);
+      
+      // Emite a lista atualizada
+      emitTypingStatus();
+    });
+
+    // Função auxiliar para emitir status de digitação
+    const emitTypingStatus = () => {
+      const now = Date.now();
+      const activeTypers: string[] = [];
+      
+      // Remove usuários que pararam de digitar (timeout)
+      for (const [uid, data] of typingUsers.entries()) {
+        if (now - data.timestamp > TYPING_TIMEOUT) {
+          typingUsers.delete(uid);
+        } else {
+          activeTypers.push(data.nickname);
+        }
+      }
+      
+      // Emite para todos na sala global
+      io.to("global").emit("chat:typing_status", { 
+        typingUsers: activeTypers,
+        count: activeTypers.length 
+      });
+    };
+
     // Evento de desconexão
     socket.on("disconnect", () => {
       console.log(`🚪 Usuário ${socket.id} desconectado`);
       if (userId) {
         usersInGlobalChat.delete(userId);
         connectedUsers.delete(userId);
+        typingUsers.delete(userId);
         emitPresence();
+        emitTypingStatus();
       }
     });
   });
