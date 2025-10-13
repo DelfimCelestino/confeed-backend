@@ -26,6 +26,8 @@ model User {
   screen                String?
   state                 String?
   city                  String?
+  isAI                  Boolean         @default(false)
+  aiPersonality         String?         @db.Text
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
   confessions           Confession[]

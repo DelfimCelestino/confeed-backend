@@ -3,6 +3,7 @@ import { FastifyInstance } from "fastify";
 import { Server as HTTPServer } from "http";
 import { verifyId, verifyToken } from "../utils/jwt";
 import { PrismaClient } from "@prisma/client";
+import { geminiService } from "../services/geminiService";
 
 const prisma = new PrismaClient();
 
@@ -22,6 +23,9 @@ const unreadByUserId: Map<string, number> = new Map();
 const typingUsers: Map<string, { nickname: string; timestamp: number }> = new Map();
 const TYPING_TIMEOUT = 3000; // 3 segundos
 
+// Controle de usuários AI ativos (para count de presença)
+const activeAIUsers: Map<string, { nickname: string; avatarUrl?: string; lastActive: number }> = new Map();
+
 interface GlobalChatMessage {
   id: string;
   userId: string;
@@ -39,6 +43,168 @@ interface GlobalChatMessage {
 
 // Instância global do Socket.IO
 let io: Server;
+
+// Funções globais para emitir presença e typing status
+function emitPresenceGlobal() {
+  if (!io) return;
+  
+  // Limpar AIs inativos (mais de 2 minutos)
+  const now = Date.now();
+  for (const [aiUserId, aiData] of activeAIUsers.entries()) {
+    if (now - aiData.lastActive > 120000) {
+      activeAIUsers.delete(aiUserId);
+    }
+  }
+
+  // Combinar usuários reais e AIs
+  const realUsers = Array.from(connectedUsers.values()).map(({ userId, socketId }) => {
+    const s = io.sockets.sockets.get(socketId);
+    return {
+      userId,
+      nickname: (s?.data?.nickname as string | undefined) || undefined,
+      avatarUrl: (s?.data?.avatarUrl as string | undefined) || undefined,
+    };
+  });
+
+  const aiUsers = Array.from(activeAIUsers.entries()).map(([userId, data]) => ({
+    userId,
+    nickname: data.nickname,
+    avatarUrl: data.avatarUrl,
+  }));
+
+  const allUsers = [...realUsers, ...aiUsers];
+  
+  io.emit("presence:count", { count: allUsers.length });
+  io.emit("presence:list", { users: allUsers });
+}
+
+function emitTypingStatusGlobal() {
+  if (!io) return;
+  
+  const now = Date.now();
+  const activeTypers: string[] = [];
+  
+  // Remove usuários que pararam de digitar (timeout)
+  for (const [uid, data] of typingUsers.entries()) {
+    if (now - data.timestamp > TYPING_TIMEOUT) {
+      typingUsers.delete(uid);
+    } else {
+      activeTypers.push(data.nickname);
+    }
+  }
+  
+  // Emite para todos na sala global
+  io.to("global").emit("chat:typing_status", { 
+    typingUsers: activeTypers,
+    count: activeTypers.length 
+  });
+}
+
+// Função para processar resposta da AI
+async function processAIResponse(lastMessage: GlobalChatMessage) {
+  try {
+    // Buscar últimas mensagens para contexto
+    const recentMessages = await (prisma as any).chatMessage.findMany({
+      take: 10,
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nickname: true,
+            isAI: true,
+          },
+        },
+      },
+    });
+
+    // Construir contexto
+    const context = {
+      recentMessages: recentMessages.reverse().map((m: any) => ({
+        nickname: m.user.nickname,
+        text: m.text,
+        isAI: m.user.isAI || false,
+      })),
+    };
+
+    // Verificar se AI deve responder
+    const shouldRespond = await geminiService.shouldRespond(context);
+    if (!shouldRespond) return;
+
+    // Gerar resposta primeiro para ter os dados do usuário
+    const aiResponse = await geminiService.generateResponse(context);
+    if (!aiResponse) return;
+
+    // Adicionar AI aos usuários ativos
+    activeAIUsers.set(aiResponse.userId, {
+      nickname: aiResponse.nickname,
+      avatarUrl: aiResponse.avatarUrl,
+      lastActive: Date.now()
+    });
+
+    // Emitir presença atualizada
+    emitPresenceGlobal();
+
+    // Simular digitação da AI
+    typingUsers.set(aiResponse.userId, { 
+      nickname: aiResponse.nickname, 
+      timestamp: Date.now() 
+    });
+    emitTypingStatusGlobal();
+
+    // Simular digitação por 2-4 segundos
+    const typingDelay = 2000 + Math.random() * 2000;
+    
+    setTimeout(async () => {
+      try {
+        // Remover da lista de digitando
+        typingUsers.delete(aiResponse.userId);
+        emitTypingStatusGlobal();
+
+        // Salvar mensagem da AI no banco
+        const savedMessage = await (prisma as any).chatMessage.create({
+          data: {
+            userId: aiResponse.userId,
+            text: aiResponse.text,
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                nickname: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        });
+
+        const message: GlobalChatMessage = {
+          id: savedMessage.id,
+          userId: savedMessage.userId,
+          nickname: savedMessage.user?.nickname,
+          avatarUrl: savedMessage.user?.avatarUrl ?? undefined,
+          text: savedMessage.text,
+          createdAt: savedMessage.createdAt.toISOString(),
+        };
+
+        // Atualizar último uso do AI
+        activeAIUsers.set(aiResponse.userId, {
+          nickname: aiResponse.nickname,
+          avatarUrl: aiResponse.avatarUrl,
+          lastActive: Date.now()
+        });
+
+        // Broadcast para sala global
+        io.to("global").emit("chat:message", message);
+        console.log(`🤖 AI (${aiResponse.nickname}) respondeu: ${aiResponse.text.substring(0, 50)}...`);
+      } catch (error) {
+        console.error("Erro ao processar resposta AI:", error);
+      }
+    }, typingDelay);
+  } catch (error) {
+    console.error("Erro ao processar AI:", error);
+  }
+}
 
 export const initialize = (fastify: FastifyInstance) => {
   const httpServer = fastify.server as HTTPServer;
@@ -109,7 +275,16 @@ export const initialize = (fastify: FastifyInstance) => {
 
     // Atualiza e emite presença (contagem + lista simples)
     const emitPresence = () => {
-      const list = Array.from(connectedUsers.values()).map(({ userId, socketId }) => {
+      // Limpar AIs inativos (mais de 2 minutos)
+      const now = Date.now();
+      for (const [aiUserId, aiData] of activeAIUsers.entries()) {
+        if (now - aiData.lastActive > 120000) {
+          activeAIUsers.delete(aiUserId);
+        }
+      }
+
+      // Combinar usuários reais e AIs
+      const realUsers = Array.from(connectedUsers.values()).map(({ userId, socketId }) => {
         const s = io.sockets.sockets.get(socketId);
         return {
           userId,
@@ -117,14 +292,31 @@ export const initialize = (fastify: FastifyInstance) => {
           avatarUrl: (s?.data?.avatarUrl as string | undefined) || undefined,
         };
       });
-      io.emit("presence:count", { count: connectedUsers.size });
-      io.emit("presence:list", { users: list });
+
+      const aiUsers = Array.from(activeAIUsers.entries()).map(([userId, data]) => ({
+        userId,
+        nickname: data.nickname,
+        avatarUrl: data.avatarUrl,
+      }));
+
+      const allUsers = [...realUsers, ...aiUsers];
+      
+      io.emit("presence:count", { count: allUsers.length });
+      io.emit("presence:list", { users: allUsers });
     };
     emitPresence();
 
     // Permite o cliente solicitar a contagem atual
     socket.on("presence:get", () => {
-      const list = Array.from(connectedUsers.values()).map(({ userId, socketId }) => {
+      // Limpar AIs inativos
+      const now = Date.now();
+      for (const [aiUserId, aiData] of activeAIUsers.entries()) {
+        if (now - aiData.lastActive > 120000) {
+          activeAIUsers.delete(aiUserId);
+        }
+      }
+
+      const realUsers = Array.from(connectedUsers.values()).map(({ userId, socketId }) => {
         const s = io.sockets.sockets.get(socketId);
         return {
           userId,
@@ -132,8 +324,17 @@ export const initialize = (fastify: FastifyInstance) => {
           avatarUrl: (s?.data?.avatarUrl as string | undefined) || undefined,
         };
       });
-      socket.emit("presence:count", { count: connectedUsers.size });
-      socket.emit("presence:list", { users: list });
+
+      const aiUsers = Array.from(activeAIUsers.entries()).map(([userId, data]) => ({
+        userId,
+        nickname: data.nickname,
+        avatarUrl: data.avatarUrl,
+      }));
+
+      const allUsers = [...realUsers, ...aiUsers];
+      
+      socket.emit("presence:count", { count: allUsers.length });
+      socket.emit("presence:list", { users: allUsers });
     });
 
     // Usuário abriu a tela do chat global
@@ -208,6 +409,12 @@ export const initialize = (fastify: FastifyInstance) => {
 
         // Broadcast para sala global
         io.to("global").emit("chat:message", message);
+
+        // Verificar se a AI deve responder (apenas para mensagens de humanos)
+        const senderUser = await (prisma as any).user.findUnique({ where: { id: userId } });
+        if (senderUser && !senderUser.isAI) {
+          processAIResponse(message);
+        }
 
         // Detecção de menções por @nickname ou @nickname#123
         const mentionMatches = payload.text.match(/@([a-zA-Z0-9_\.\-#]+)/g) || [];

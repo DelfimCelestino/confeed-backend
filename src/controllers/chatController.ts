@@ -3,13 +3,6 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-interface ChatHistoryRequest extends FastifyRequest {
-  query: {
-    limit?: string;
-    offset?: string;
-  };
-}
-
 export const getChatHistory = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const limit = Math.min(parseInt((request.query as any).limit || "100"), 100);
