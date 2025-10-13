@@ -8,7 +8,7 @@ const s3Client = new S3Client({
   },
 });
 
-export const S3_BUCKET = process.env.AWS_S3_BUCKET || "radii-avatars";
+export const S3_BUCKET = process.env.AWS_S3_BUCKET || "confeed-images";
 
 export const getS3Url = (key: string): string => {
   return `https://${S3_BUCKET}.s3.amazonaws.com/${key}`;
