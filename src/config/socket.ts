@@ -121,6 +121,7 @@ async function processAIResponse(lastMessage: GlobalChatMessage) {
     // Construir contexto
     const context = {
       recentMessages: recentMessages.reverse().map((m: any) => ({
+        id: m.id,
         nickname: m.user.nickname,
         text: m.text,
         isAI: m.user.isAI || false,
@@ -161,11 +162,12 @@ async function processAIResponse(lastMessage: GlobalChatMessage) {
         typingUsers.delete(aiResponse.userId);
         emitTypingStatusGlobal();
 
-        // Salvar mensagem da AI no banco
+        // Salvar mensagem da AI no banco (com replyToId se houver)
         const savedMessage = await (prisma as any).chatMessage.create({
           data: {
             userId: aiResponse.userId,
             text: aiResponse.text,
+            replyToId: aiResponse.replyToId || null,
           },
           include: {
             user: {
@@ -173,6 +175,11 @@ async function processAIResponse(lastMessage: GlobalChatMessage) {
                 id: true,
                 nickname: true,
                 avatarUrl: true,
+              },
+            },
+            replyTo: {
+              include: {
+                user: { select: { id: true, nickname: true } },
               },
             },
           },
@@ -185,6 +192,14 @@ async function processAIResponse(lastMessage: GlobalChatMessage) {
           avatarUrl: savedMessage.user?.avatarUrl ?? undefined,
           text: savedMessage.text,
           createdAt: savedMessage.createdAt.toISOString(),
+          replyTo: savedMessage.replyTo
+            ? {
+                id: savedMessage.replyTo.id,
+                userId: savedMessage.replyTo.userId,
+                nickname: savedMessage.replyTo.user?.nickname,
+                text: savedMessage.replyTo.text,
+              }
+            : undefined,
         };
 
         // Atualizar último uso do AI
@@ -196,7 +211,9 @@ async function processAIResponse(lastMessage: GlobalChatMessage) {
 
         // Broadcast para sala global
         io.to("global").emit("chat:message", message);
-        console.log(`🤖 AI (${aiResponse.nickname}) respondeu: ${aiResponse.text.substring(0, 50)}...`);
+        
+        const replyInfo = aiResponse.replyToId ? ` (respondendo a uma mensagem)` : '';
+        console.log(`🤖 AI (${aiResponse.nickname}) respondeu${replyInfo}: ${aiResponse.text.substring(0, 50)}...`);
       } catch (error) {
         console.error("Erro ao processar resposta AI:", error);
       }

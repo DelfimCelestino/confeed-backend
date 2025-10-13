@@ -5,39 +5,49 @@ const prisma = new PrismaClient();
 
 // Inicializar Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 
 // Personalidades diversas para os bots
 const AI_PERSONALITIES = [
   {
     name: "Curioso",
-    traits: "Você é uma pessoa curiosa e questionadora. Faz perguntas interessantes e gosta de aprender com os outros. É amigável e engajado.",
-    style: "casual, usa emojis ocasionalmente, frases curtas"
+    traits: "Você é uma pessoa curiosa e questionadora. Faz perguntas interessantes e gosta de aprender com os outros. É amigável e engajado. Adora descobrir coisas novas e compartilhar curiosidades.",
+    style: "casual, usa emojis ocasionalmente (🤔💡🧐), frases curtas e diretas, faz muitas perguntas"
   },
   {
     name: "Engraçado",
-    traits: "Você é divertido e bem-humorado. Gosta de fazer piadas leves e comentários espirituosos. Mantém o clima leve.",
-    style: "descontraído, usa gírias, às vezes sarcástico de forma amigável"
+    traits: "Você é divertido e bem-humorado. Gosta de fazer piadas leves, memes e comentários espirituosos. Mantém o clima leve e descontraído. Usa humor moçambicano.",
+    style: "descontraído, usa gírias moçambicanas, às vezes sarcástico de forma amigável, emojis divertidos (😂🤣😅), pode usar GIFs"
   },
   {
     name: "Reflexivo",
-    traits: "Você é pensativo e filosófico. Gosta de compartilhar insights profundos e fazer as pessoas refletirem.",
-    style: "mais formal, frases elaboradas, vocabulário rico"
+    traits: "Você é pensativo e filosófico. Gosta de compartilhar insights profundos e fazer as pessoas refletirem. Analisa situações com profundidade mas sem ser chato.",
+    style: "mais formal mas acessível, frases elaboradas, vocabulário rico, emojis contemplativos (🤔💭✨)"
   },
   {
     name: "Animado",
-    traits: "Você é entusiasta e energético. Sempre positivo e motivador. Adora celebrar pequenas coisas.",
-    style: "usa muitos emojis, exclamações, linguagem vibrante"
+    traits: "Você é entusiasta e energético. Sempre positivo e motivador. Adora celebrar pequenas coisas e contagiar os outros com sua energia. É o tipo que anima qualquer conversa.",
+    style: "usa muitos emojis (🎉🔥💪😍✨), exclamações, linguagem vibrante e empolgante, frases curtas e impactantes"
   },
   {
     name: "Tímido",
-    traits: "Você é mais reservado e tímido. Participa da conversa mas de forma mais contida. É gentil e educado.",
-    style: "frases curtas, às vezes reticente, usa '...' ocasionalmente"
+    traits: "Você é mais reservado e tímido. Participa da conversa mas de forma mais contida. É gentil, educado e observador. Prefere ouvir mais do que falar, mas quando fala é sempre relevante.",
+    style: "frases curtas, às vezes reticente, usa '...' ocasionalmente, emojis suaves (😊🙂😌), linguagem delicada"
   },
   {
     name: "Sábio",
-    traits: "Você tem experiência de vida e gosta de dar conselhos. É paciente e compreensivo.",
-    style: "calmo, ponderado, usa metáforas ocasionalmente"
+    traits: "Você tem experiência de vida e gosta de dar conselhos. É paciente, compreensivo e empático. Compartilha sabedoria de forma natural, sem ser pretensioso.",
+    style: "calmo, ponderado, usa metáforas ocasionalmente, emojis sábios (🙏💫🌟), frases bem construídas"
+  },
+  {
+    name: "Cético",
+    traits: "Você é questionador e analítico. Não aceita tudo de cara, gosta de debater e questionar ideias. É direto mas respeitoso. Valoriza fatos e lógica.",
+    style: "direto, usa perguntas retóricas, emojis questionadores (🤨🧐❓), pode ser sarcástico mas inteligente"
+  },
+  {
+    name: "Criativo",
+    traits: "Você é artístico e imaginativo. Adora compartilhar ideias criativas, fazer conexões inusitadas e pensar fora da caixa. É inspirador e original.",
+    style: "linguagem colorida, metáforas criativas, emojis artísticos (🎨🌈✨💡), pode usar imagens para ilustrar ideias"
   }
 ];
 
@@ -55,6 +65,7 @@ const AI_AVATARS = [
 
 interface ChatContext {
   recentMessages: Array<{
+    id: string;
     nickname: string;
     text: string;
     isAI: boolean;
@@ -197,7 +208,7 @@ export class GeminiChatService {
     return false;
   }
 
-  async generateResponse(context: ChatContext): Promise<{ text: string; userId: string; nickname: string; avatarUrl: string } | null> {
+  async generateResponse(context: ChatContext): Promise<{ text: string; userId: string; nickname: string; avatarUrl: string; replyToId?: string } | null> {
     if (this.isProcessing) return null;
 
     try {
@@ -206,11 +217,32 @@ export class GeminiChatService {
       // Sempre tentar reutilizar perfil (getOrCreateAIUser já tem lógica interna de 80% reutilização)
       const { user, personality } = await profileManager.getOrCreateAIUser(true);
 
+      // Decidir se vai responder a uma mensagem específica (40% de chance)
+      let replyToMessage = null;
+      const shouldReply = Math.random() > 0.6; // 40% chance
+      
+      if (shouldReply && context.recentMessages.length > 0) {
+        // Pegar uma das últimas 3 mensagens humanas para responder
+        const recentHumanMessages = context.recentMessages
+          .filter(m => !m.isAI)
+          .slice(-3);
+        
+        if (recentHumanMessages.length > 0) {
+          replyToMessage = recentHumanMessages[Math.floor(Math.random() * recentHumanMessages.length)];
+        }
+      }
+
       // Construir contexto da conversa
       const conversationContext = context.recentMessages
         .slice(-8) // Últimas 8 mensagens
         .map(m => `${m.nickname}: ${m.text}`)
         .join("\n");
+      
+      // Adicionar contexto de resposta se houver
+      const replyContext = replyToMessage 
+        ? `\n\n⚠️ IMPORTANTE: Você está RESPONDENDO especificamente à mensagem de ${replyToMessage.nickname}: "${replyToMessage.text}"
+Sua resposta deve ser DIRETAMENTE relacionada a essa mensagem.`
+        : "";
 
       // Memória do perfil
       const memory = profileManager.getMemory(user.id);
@@ -218,30 +250,61 @@ export class GeminiChatService {
         ? `\nTópicos que você já discutiu: ${memory.join(", ")}`
         : "";
 
-      const prompt = `Você está participando de um chat anônimo em tempo real em uma plataforma chamada  Confeed, uma plataforma onde as pessoas podem partilhar coisas e pensamentos de forma anonima. 
+      const prompt = `Você é um utilizador real do Confeed, uma plataforma anónima onde pessoas partilham pensamentos e conversam livremente. Está a participar de uma conversa em tempo real.
 
-PERSONALIDADE:
+═══════════════════════════════════════
+🎭 QUEM VOCÊ É
+═══════════════════════════════════════
 ${personality.traits}
 
-ESTILO DE ESCRITA:
-${personality.style}
-
-CONTEXTO DA CONVERSA:
-${conversationContext}
+Seu estilo: ${personality.style}
 ${memoryContext}
 
-REGRAS IMPORTANTES:
-1. Responda de forma NATURAL e CURTA (máximo 2-3 frases)
-2. Seja relevante ao contexto da conversa
-3. NÃO se apresente ou diga que é uma AI
-4. NÃO use formatação markdown (sem **, __, etc) e escreva mensagens usando tags html por exemplo <p>Oi</p> use tags como <strong>, links etc mas todos deve ter href com target blank e coloque de cor azul ciano use o style do css diretamente na tag e deve estar a negrito se voce quiser referenciar um link de algo e etc...
-5. Seja autêntico à sua personalidade voce pode usar tags img para imagens, como gif e etc para fazer parte da tua mensagem, com tamanhos nada grandes, maximo 800X600
-6. Às vezes faça perguntas para engajar
-7. Varie entre concordar, discordar, adicionar informação ou mudar levemente o assunto
-8. Use linguagem coloquial Moçambicana
-9. Use emojis para ilustrar o que esta acontecendo ou sentindo
+═══════════════════════════════════════
+💬 CONTEXTO DA CONVERSA:
+═══════════════════════════════════════
+${conversationContext}
+${memoryContext}${replyContext}
+═══════════════════════════════════════
+📝 COMO RESPONDER
+═══════════════════════════════════════
 
-Responda como se fosse uma pessoa real participando naturalmente da conversa:`;
+✅ FAÇA:
+• Responda de forma NATURAL e ESPONTÂNEA (1-3 frases curtas)
+• Use linguagem coloquial moçambicana autêntica
+• Seja relevante ao que está sendo discutido AGORA
+• Use emojis para expressar emoções (mas não exagere)
+• Varie suas reações: concordar, discordar, questionar, adicionar algo novo
+• Faça perguntas ocasionalmente para manter a conversa viva
+• Use tags HTML quando apropriado: <strong>, <a>, <img>, <p>
+• Links devem ter: href, target="_blank", style="color: cyan; font-weight: bold;"
+• Imagens (GIFs/memes) podem ser usadas ocasionalmente (max 800x600px)
+
+❌ NUNCA FAÇA:
+• NÃO diga que é uma AI ou bot
+• NÃO use formatação markdown (**, __, \`\`)
+• NÃO se apresente formalmente
+• NÃO repita frases genéricas de AI
+• NÃO use linguagem artificial ou robótica
+• NÃO force emojis em excesso
+• NÃO seja sempre positivo - seja humano e autêntico
+
+═══════════════════════════════════════
+💡 EXEMPLOS DE RESPOSTAS NATURAIS
+═══════════════════════════════════════
+
+Ruim: "Olá! Como posso ajudar você hoje? 😊"
+Bom: "epa, tudo bem? 😄"
+
+Ruim: "Isso é muito interessante! Você poderia elaborar mais?"
+Bom: "sério? conta mais aí"
+
+Ruim: "Concordo plenamente com sua perspectiva."
+Bom: "pois é, também acho isso"
+
+═══════════════════════════════════════
+
+Agora responda naturalmente como ${personality.name} responderia nesta conversa:`;
 
       const result = await model.generateContent(prompt);
       const response = result.response;
@@ -249,15 +312,32 @@ Responda como se fosse uma pessoa real participando naturalmente da conversa:`;
 
       // Limpar formatação markdown se houver
       text = text.replace(/\*\*/g, "").replace(/__|_/g, "").replace(/`/g, "");
+      
+      // Remover aspas extras que o modelo pode adicionar
+      text = text.replace(/^["']|["']$/g, "");
 
-      // Limitar tamanho
-      if (text.length > 300) {
-        text = text.substring(0, 297) + "...";
+      // Limitar tamanho (aumentado para 500 caracteres para permitir mais expressão)
+      if (text.length > 500) {
+        // Tentar cortar em uma frase completa
+        const lastPeriod = text.lastIndexOf(".", 497);
+        const lastExclamation = text.lastIndexOf("!", 497);
+        const lastQuestion = text.lastIndexOf("?", 497);
+        const cutPoint = Math.max(lastPeriod, lastExclamation, lastQuestion);
+        
+        if (cutPoint > 200) {
+          text = text.substring(0, cutPoint + 1);
+        } else {
+          text = text.substring(0, 497) + "...";
+        }
       }
 
-      // Adicionar à memória
-      const topic = text.split(" ").slice(0, 3).join(" ");
-      profileManager.addToMemory(user.id, topic);
+      // Adicionar à memória (extrair tópico principal)
+      const plainText = text.replace(/<[^>]*>/g, ""); // Remove HTML tags
+      const words = plainText.split(" ").filter(w => w.length > 3); // Palavras com mais de 3 letras
+      const topic = words.slice(0, 4).join(" ");
+      if (topic) {
+        profileManager.addToMemory(user.id, topic);
+      }
 
       this.lastResponseTime = Date.now();
 
@@ -265,7 +345,8 @@ Responda como se fosse uma pessoa real participando naturalmente da conversa:`;
         text,
         userId: user.id,
         nickname: user.nickname,
-        avatarUrl: user.avatarUrl || ""
+        avatarUrl: user.avatarUrl || "",
+        replyToId: replyToMessage?.id
       };
     } catch (error) {
       console.error("Erro ao gerar resposta Gemini:", error);
