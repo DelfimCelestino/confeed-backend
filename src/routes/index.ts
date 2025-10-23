@@ -98,7 +98,7 @@ const routes = {
           nodeVersion: process.version,
           platform: process.platform,
           app: {
-            name: "UniLar API",
+            name: "Confeed API",
             version: "1.0.0",
             minimumClientVersion: "1.0.0",
             forceUpdate: false,
