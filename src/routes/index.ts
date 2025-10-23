@@ -6,6 +6,7 @@ import * as CommunityController from "../controllers/communityController";
 import * as SearchController from "../controllers/searchController";
 import * as NotificationsController from "../controllers/notificationsController";
 import * as ChatController from "../controllers/chatController";
+import { prisma } from "../config/db";
 
 
 // Agrupa todas as rotas em um objeto
@@ -57,21 +58,87 @@ const routes = {
   // Registra health check
   health: async (fastify: FastifyInstance) => {
     fastify.get("/", async (req, res) => {
-   
-
-      res.send({
-        status: "ok",
-        date: new Date(),
-        systemInfo:{
-          currentVersion: "1.0.0",
-          minimumVersion: "1.0.0",
-          forceUpdate: false,
-          updateMessage: "Nova versão disponível",
-        },
-      });
+      const startTime = Date.now();
+      
+      try {
+        // Testar conexão com banco de dados
+        await prisma.$queryRaw`SELECT 1`;
+        const dbResponseTime = Date.now() - startTime;
+        
+        // Informações do processo Node.js
+        const memoryUsage = process.memoryUsage();
+        const uptime = process.uptime();
+        
+        // Informações do sistema
+        const cpuUsage = process.cpuUsage();
+        
+        res.send({
+          status: "healthy",
+          timestamp: new Date().toISOString(),
+          uptime: {
+            seconds: Math.floor(uptime),
+            formatted: formatUptime(uptime),
+          },
+          database: {
+            status: "connected",
+            responseTime: `${dbResponseTime}ms`,
+          },
+          memory: {
+            rss: formatBytes(memoryUsage.rss),
+            heapTotal: formatBytes(memoryUsage.heapTotal),
+            heapUsed: formatBytes(memoryUsage.heapUsed),
+            external: formatBytes(memoryUsage.external),
+            usagePercentage: ((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100).toFixed(2) + '%',
+          },
+          cpu: {
+            user: `${(cpuUsage.user / 1000000).toFixed(2)}s`,
+            system: `${(cpuUsage.system / 1000000).toFixed(2)}s`,
+          },
+          environment: process.env.NODE_ENV || 'development',
+          nodeVersion: process.version,
+          platform: process.platform,
+          app: {
+            name: "UniLar API",
+            version: "1.0.0",
+            minimumClientVersion: "1.0.0",
+            forceUpdate: false,
+          },
+        });
+      } catch (error) {
+        res.status(503).send({
+          status: "unhealthy",
+          timestamp: new Date().toISOString(),
+          error: "Database connection failed",
+          details: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
     });
   },
 };
+
+// Funções auxiliares
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+  
+  return parts.join(' ');
+}
 
 // Função para registrar todas as rotas
 export const registerRoutes = async (fastify: FastifyInstance) => {
